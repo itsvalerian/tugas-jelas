@@ -376,12 +376,12 @@ const CalendarPage: React.FC = () => {
               </div>
               <div className="space-y-2">
                 <Label>Proyek (Opsional)</Label>
-                <Select value={eventProjectId} onValueChange={setEventProjectId}>
+                <Select value={eventProjectId || "none"} onValueChange={(v) => setEventProjectId(v === "none" ? "" : v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih proyek" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Tidak Ada</SelectItem>
+                    <SelectItem value="none">Tidak Ada</SelectItem>
                     {data.projects.map(p => (
                       <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                     ))}
