@@ -55,25 +55,32 @@ const CalendarPage: React.FC = () => {
   const [eventProjectId, setEventProjectId] = useState('');
 
   // Get calendar items (tasks + events)
-  const calendarItems = useMemo(() => {
-    const items: Array<{
-      id: string;
-      title: string;
-      date: Date;
-      type: 'task' | 'event';
-      color: string;
-      originalItem: Task | typeof data.events[0];
-    }> = [];
+  type CalendarItem = {
+    id: string;
+    title: string;
+    startDate: Date;
+    endDate: Date;
+    type: 'task' | 'event';
+    color: string;
+    originalItem: Task | typeof data.events[0];
+  };
 
-    // Add tasks
+  const calendarItems = useMemo((): CalendarItem[] => {
+    const items: CalendarItem[] = [];
+
+    // Add tasks - spanning from start_date to due_date
     data.tasks.forEach(task => {
       if (!task.show_in_calendar) return;
       
-      if (task.due_date) {
+      const startDate = task.start_date ? parseISO(task.start_date) : null;
+      const endDate = task.due_date ? parseISO(task.due_date) : null;
+      
+      if (startDate || endDate) {
         items.push({
           id: task.id,
           title: task.title,
-          date: parseISO(task.due_date),
+          startDate: startDate || endDate!,
+          endDate: endDate || startDate!,
           type: 'task',
           color: task.status === 'done' ? 'bg-success/20 text-success border-success/30' :
                  task.status === 'overdue' ? 'bg-destructive/20 text-destructive border-destructive/30' :
@@ -88,7 +95,8 @@ const CalendarPage: React.FC = () => {
       items.push({
         id: event.id,
         title: event.title,
-        date: parseISO(event.start_datetime),
+        startDate: parseISO(event.start_datetime),
+        endDate: parseISO(event.end_datetime),
         type: 'event',
         color: event.event_type === 'meeting' ? 'bg-info/20 text-info border-info/30' :
                event.event_type === 'reminder' ? 'bg-warning/20 text-warning border-warning/30' :
@@ -163,8 +171,33 @@ const CalendarPage: React.FC = () => {
 
   const weekDays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 
+  // Check if a date falls within an item's date range
   const getItemsForDate = (date: Date) => {
-    return calendarItems.filter(item => isSameDay(item.date, date));
+    return calendarItems.filter(item => {
+      const itemStart = new Date(item.startDate.getFullYear(), item.startDate.getMonth(), item.startDate.getDate());
+      const itemEnd = new Date(item.endDate.getFullYear(), item.endDate.getMonth(), item.endDate.getDate());
+      const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      return checkDate >= itemStart && checkDate <= itemEnd;
+    });
+  };
+
+  // Check position of date within item's range for styling
+  const getItemPosition = (item: CalendarItem, date: Date): 'start' | 'middle' | 'end' | 'single' => {
+    const isStart = isSameDay(item.startDate, date);
+    const isEnd = isSameDay(item.endDate, date);
+    if (isStart && isEnd) return 'single';
+    if (isStart) return 'start';
+    if (isEnd) return 'end';
+    return 'middle';
+  };
+
+  const getPositionClasses = (position: 'start' | 'middle' | 'end' | 'single') => {
+    switch (position) {
+      case 'start': return 'rounded-l-md rounded-r-none border-r-0';
+      case 'middle': return 'rounded-none border-l-0 border-r-0';
+      case 'end': return 'rounded-r-md rounded-l-none border-l-0';
+      case 'single': return 'rounded-md';
+    }
   };
 
   return (
@@ -236,14 +269,18 @@ const CalendarPage: React.FC = () => {
                       {format(date, 'd')}
                     </span>
                     <div className="mt-1 space-y-1">
-                      {dayItems.slice(0, 3).map(item => (
-                        <div
-                          key={item.id}
-                          className={`text-xs px-1.5 py-0.5 rounded truncate border ${item.color}`}
-                        >
-                          {item.title}
-                        </div>
-                      ))}
+                      {dayItems.slice(0, 3).map(item => {
+                        const position = getItemPosition(item, date);
+                        const positionClasses = getPositionClasses(position);
+                        return (
+                          <div
+                            key={item.id}
+                            className={`text-xs px-1.5 py-0.5 truncate border ${item.color} ${positionClasses}`}
+                          >
+                            {(position === 'start' || position === 'single') ? item.title : ''}
+                          </div>
+                        );
+                      })}
                       {dayItems.length > 3 && (
                         <div className="text-xs text-muted-foreground">
                           +{dayItems.length - 3} lainnya
