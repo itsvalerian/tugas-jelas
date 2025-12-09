@@ -57,20 +57,6 @@ const GanttPage: React.FC = () => {
   }, [tasks]);
 
   const totalDays = dateRange.days.length;
-  const dayWidth = Math.max(100 / totalDays, 2);
-
-  const getTaskPosition = (startDate: string | null, dueDate: string | null) => {
-    const start = startDate ? parseISO(startDate) : parseISO(dueDate!);
-    const end = dueDate ? parseISO(dueDate) : start;
-    
-    const startOffset = differenceInDays(start, dateRange.start);
-    const duration = Math.max(differenceInDays(end, start) + 1, 1);
-
-    return {
-      left: `${(startOffset / totalDays) * 100}%`,
-      width: `${(duration / totalDays) * 100}%`,
-    };
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -138,16 +124,22 @@ const GanttPage: React.FC = () => {
                 <div className="w-64 shrink-0 p-3 border-r border-border">
                   <span className="text-sm font-medium text-muted-foreground">Tugas</span>
                 </div>
-                <div className="flex-1 flex">
-                  {dateRange.days.map((day, idx) => (
-                    <div
-                      key={idx}
-                      className="text-center text-xs text-muted-foreground p-2 border-r border-border flex-1 min-w-[30px]"
-                    >
-                      <div>{format(day, 'd')}</div>
-                      <div className="text-[10px]">{format(day, 'EEE', { locale: id })}</div>
-                    </div>
-                  ))}
+                <div className="flex-1 relative">
+                  <div className="flex">
+                    {dateRange.days.map((day, idx) => {
+                      const colWidth = 100 / totalDays;
+                      return (
+                        <div
+                          key={idx}
+                          className="text-center text-xs text-muted-foreground p-2 border-r border-border"
+                          style={{ width: `${colWidth}%`, minWidth: '40px' }}
+                        >
+                          <div>{format(day, 'd')}</div>
+                          <div className="text-[10px]">{format(day, 'EEE', { locale: id })}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
@@ -155,7 +147,12 @@ const GanttPage: React.FC = () => {
               {tasks
                 .filter(t => t.start_date || t.due_date)
                 .map(task => {
-                  const position = getTaskPosition(task.start_date, task.due_date);
+                  const start = task.start_date ? parseISO(task.start_date) : parseISO(task.due_date!);
+                  const end = task.due_date ? parseISO(task.due_date) : start;
+                  
+                  const startOffset = differenceInDays(start, dateRange.start);
+                  const duration = Math.max(differenceInDays(end, start) + 1, 1);
+                  const colWidth = 100 / totalDays;
                   
                   return (
                     <div key={task.id} className="flex border-b border-border hover:bg-accent/30 transition-colors">
@@ -166,12 +163,25 @@ const GanttPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex-1 relative h-12">
+                        <div className="flex h-full">
+                          {dateRange.days.map((_, idx) => (
+                            <div
+                              key={idx}
+                              className="border-r border-border/30"
+                              style={{ width: `${colWidth}%`, minWidth: '40px' }}
+                            />
+                          ))}
+                        </div>
                         <div
-                          className={`absolute top-1/2 -translate-y-1/2 h-6 rounded-full ${getStatusColor(task.status)} opacity-80 hover:opacity-100 transition-opacity cursor-pointer`}
-                          style={position}
+                          className={`absolute top-1/2 -translate-y-1/2 h-6 rounded ${getStatusColor(task.status)} opacity-90 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center`}
+                          style={{
+                            left: `calc(${startOffset * colWidth}% + 2px)`,
+                            width: `calc(${duration * colWidth}% - 4px)`,
+                            minWidth: '20px'
+                          }}
                           title={`${task.title} (${task.start_date ? format(parseISO(task.start_date), 'd MMM', { locale: id }) : ''} - ${task.due_date ? format(parseISO(task.due_date), 'd MMM', { locale: id }) : ''})`}
                         >
-                          <span className="absolute inset-0 flex items-center justify-center text-[10px] text-foreground font-medium truncate px-2">
+                          <span className="text-[10px] text-foreground font-medium truncate px-2">
                             {task.title}
                           </span>
                         </div>

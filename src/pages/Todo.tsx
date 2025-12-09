@@ -88,24 +88,36 @@ const TodoPage: React.FC = () => {
   const filteredTasks = useMemo(() => {
     let tasks = allTasks;
 
+    // Helper to check if task overlaps with date range
+    const taskOverlapsRange = (task: typeof allTasks[0], rangeStart: Date, rangeEnd: Date) => {
+      const taskStart = task.start_date ? parseISO(task.start_date) : (task.due_date ? parseISO(task.due_date) : null);
+      const taskEnd = task.due_date ? parseISO(task.due_date) : taskStart;
+      
+      if (!taskStart || !taskEnd) return false;
+      
+      // Check if task range overlaps with filter range
+      return taskStart <= rangeEnd && taskEnd >= rangeStart;
+    };
+
     // Filter by date range
     switch (activeTab) {
       case 'daily':
-        tasks = tasks.filter(t => t.due_date && isToday(parseISO(t.due_date)));
+        tasks = tasks.filter(t => {
+          const taskStart = t.start_date ? parseISO(t.start_date) : (t.due_date ? parseISO(t.due_date) : null);
+          const taskEnd = t.due_date ? parseISO(t.due_date) : taskStart;
+          if (!taskStart || !taskEnd) return false;
+          const todayStart = new Date(today);
+          todayStart.setHours(0, 0, 0, 0);
+          const todayEnd = new Date(today);
+          todayEnd.setHours(23, 59, 59, 999);
+          return taskStart <= todayEnd && taskEnd >= todayStart;
+        });
         break;
       case 'weekly':
-        tasks = tasks.filter(t => {
-          if (!t.due_date) return false;
-          const d = parseISO(t.due_date);
-          return d >= weekStart && d <= weekEnd;
-        });
+        tasks = tasks.filter(t => taskOverlapsRange(t, weekStart, weekEnd));
         break;
       case 'monthly':
-        tasks = tasks.filter(t => {
-          if (!t.due_date) return false;
-          const d = parseISO(t.due_date);
-          return d >= monthStart && d <= monthEnd;
-        });
+        tasks = tasks.filter(t => taskOverlapsRange(t, monthStart, monthEnd));
         break;
       case 'personal':
         tasks = tasks.filter(t => t.isPersonal);

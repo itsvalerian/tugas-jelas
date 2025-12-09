@@ -182,18 +182,23 @@ const CalendarPage: React.FC = () => {
   };
 
   // Check position of date within item's range for styling
-  const getItemPosition = (item: CalendarItem, date: Date): 'start' | 'middle' | 'end' | 'single' => {
+  // For multi-week tasks, show title at start of each week
+  const getItemPosition = (item: CalendarItem, date: Date): 'start' | 'middle' | 'end' | 'single' | 'week-start' => {
     const isStart = isSameDay(item.startDate, date);
     const isEnd = isSameDay(item.endDate, date);
     if (isStart && isEnd) return 'single';
     if (isStart) return 'start';
     if (isEnd) return 'end';
+    // Check if it's start of a week (Monday)
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 1) return 'week-start'; // Monday
     return 'middle';
   };
 
-  const getPositionClasses = (position: 'start' | 'middle' | 'end' | 'single') => {
+  const getPositionClasses = (position: 'start' | 'middle' | 'end' | 'single' | 'week-start') => {
     switch (position) {
       case 'start': return 'rounded-l border-l border-t border-b';
+      case 'week-start': return 'border-t border-b'; // Middle style but will show title
       case 'middle': return 'border-t border-b';
       case 'end': return 'rounded-r border-r border-t border-b';
       case 'single': return 'rounded border';
@@ -274,15 +279,15 @@ const CalendarPage: React.FC = () => {
                       {dayItems.slice(0, 3).map(item => {
                         const position = getItemPosition(item, date);
                         const positionClasses = getPositionClasses(position);
-                        const showTitle = position === 'start' || position === 'single';
+                        const showTitle = position === 'start' || position === 'single' || position === 'week-start';
                         return (
                           <div
                             key={item.id}
                             className={`text-xs h-5 flex items-center overflow-hidden ${item.color} ${positionClasses}`}
                             style={{ 
-                              marginLeft: position === 'middle' || position === 'end' ? '-4px' : '0',
-                              marginRight: position === 'middle' || position === 'start' ? '-4px' : '0',
-                              paddingLeft: position === 'middle' || position === 'end' ? '6px' : '4px',
+                              marginLeft: position === 'middle' || position === 'end' || position === 'week-start' ? '-4px' : '0',
+                              marginRight: position === 'middle' || position === 'start' || position === 'week-start' ? '-4px' : '0',
+                              paddingLeft: position === 'middle' || position === 'end' || position === 'week-start' ? '6px' : '4px',
                               paddingRight: '4px'
                             }}
                           >
