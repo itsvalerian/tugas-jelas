@@ -193,10 +193,10 @@ const CalendarPage: React.FC = () => {
 
   const getPositionClasses = (position: 'start' | 'middle' | 'end' | 'single') => {
     switch (position) {
-      case 'start': return 'rounded-l-md rounded-r-none border-r-0';
-      case 'middle': return 'rounded-none border-l-0 border-r-0';
-      case 'end': return 'rounded-r-md rounded-l-none border-l-0';
-      case 'single': return 'rounded-md';
+      case 'start': return 'rounded-l border-l border-t border-b';
+      case 'middle': return 'border-t border-b';
+      case 'end': return 'rounded-r border-r border-t border-b';
+      case 'single': return 'rounded border';
     }
   };
 
@@ -243,14 +243,14 @@ const CalendarPage: React.FC = () => {
         {/* Month View */}
         {viewMode === 'month' && (
           <div>
-            <div className="grid grid-cols-7 gap-1 mb-2">
+            <div className="grid grid-cols-7 mb-2">
               {weekDays.map(d => (
                 <div key={d} className="text-center text-sm font-medium text-muted-foreground py-2">
                   {d}
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7">
               {days.map((date, idx) => {
                 const dayItems = getItemsForDate(date);
                 const isCurrentMonth = isSameMonth(date, currentDate);
@@ -260,30 +260,39 @@ const CalendarPage: React.FC = () => {
                   <div
                     key={idx}
                     onClick={() => handleDateClick(date)}
-                    className={`min-h-24 p-2 border border-border rounded-lg cursor-pointer transition-colors hover:bg-accent/50
-                      ${!isCurrentMonth ? 'opacity-40' : ''}
-                      ${isCurrentDay ? 'border-primary bg-primary/5' : ''}
+                    className={`min-h-24 p-1 border-t border-l border-border cursor-pointer transition-colors hover:bg-accent/30
+                      ${idx % 7 === 6 ? 'border-r' : ''}
+                      ${idx >= days.length - 7 ? 'border-b' : ''}
+                      ${!isCurrentMonth ? 'opacity-40 bg-muted/20' : ''}
+                      ${isCurrentDay ? 'bg-primary/10' : ''}
                     `}
                   >
-                    <span className={`text-sm font-medium ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
+                    <span className={`text-sm font-medium block mb-1 ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
                       {format(date, 'd')}
                     </span>
-                    <div className="mt-1 space-y-1">
+                    <div className="space-y-0.5">
                       {dayItems.slice(0, 3).map(item => {
                         const position = getItemPosition(item, date);
                         const positionClasses = getPositionClasses(position);
+                        const showTitle = position === 'start' || position === 'single';
                         return (
                           <div
                             key={item.id}
-                            className={`text-xs px-1.5 py-0.5 truncate border ${item.color} ${positionClasses}`}
+                            className={`text-xs h-5 flex items-center overflow-hidden ${item.color} ${positionClasses}`}
+                            style={{ 
+                              marginLeft: position === 'middle' || position === 'end' ? '-4px' : '0',
+                              marginRight: position === 'middle' || position === 'start' ? '-4px' : '0',
+                              paddingLeft: position === 'middle' || position === 'end' ? '6px' : '4px',
+                              paddingRight: '4px'
+                            }}
                           >
-                            {(position === 'start' || position === 'single') ? item.title : ''}
+                            {showTitle && <span className="truncate font-medium">{item.title}</span>}
                           </div>
                         );
                       })}
                       {dayItems.length > 3 && (
-                        <div className="text-xs text-muted-foreground">
-                          +{dayItems.length - 3} lainnya
+                        <div className="text-xs text-muted-foreground pl-1">
+                          +{dayItems.length - 3} lagi
                         </div>
                       )}
                     </div>
