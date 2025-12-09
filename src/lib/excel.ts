@@ -73,3 +73,89 @@ export const exportTodos = (data: AppData) => {
   XLSX.utils.book_append_sheet(wb, ws, 'To-Do');
   XLSX.writeFile(wb, `todo_${new Date().toISOString().split('T')[0]}.xlsx`);
 };
+
+// Export all data in one file with multiple sheets
+export const exportAll = (data: AppData, projectFilter?: string) => {
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Projects
+  const projectRows = data.projects.map(project => {
+    const workspace = data.workspaces.find(w => w.id === project.workspace_id);
+    const taskCount = data.tasks.filter(t => t.project_id === project.id).length;
+    
+    return {
+      'ID': project.id.slice(0, 8),
+      'Ruang Kerja': workspace?.name || '-',
+      'Nama Proyek': project.name,
+      'Status': project.status === 'active' ? 'Aktif' : project.status === 'completed' ? 'Selesai' : 'Diarsipkan',
+      'Jumlah Tugas': taskCount,
+      'Tanggal Dibuat': new Date(project.created_at).toLocaleDateString('id-ID'),
+      'Deskripsi': project.description,
+    };
+  });
+  const wsProjects = XLSX.utils.json_to_sheet(projectRows);
+  XLSX.utils.book_append_sheet(wb, wsProjects, 'Proyek');
+
+  // Sheet 2: Tasks (filtered by project if specified)
+  let tasks = data.tasks;
+  if (projectFilter && projectFilter !== 'all') {
+    tasks = tasks.filter(t => t.project_id === projectFilter);
+  }
+
+  const taskRows = tasks.map(task => {
+    const project = data.projects.find(p => p.id === task.project_id);
+    const subtaskCount = data.subtasks.filter(s => s.task_id === task.id).length;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isOverdue = task.due_date && new Date(task.due_date) < today && task.status !== 'done';
+
+    return {
+      'ID': task.id.slice(0, 8),
+      'Nama Proyek': project?.name || '-',
+      'Nama Tugas': task.title,
+      'Deskripsi': task.description,
+      'Status': STATUS_LABELS[task.status],
+      'Prioritas': PRIORITY_LABELS[task.priority],
+      'Tanggal Mulai': task.start_date ? new Date(task.start_date).toLocaleDateString('id-ID') : '-',
+      'Tanggal Jatuh Tempo': task.due_date ? new Date(task.due_date).toLocaleDateString('id-ID') : '-',
+      'Pengulangan': RECURRENCE_LABELS[task.recurrence_type],
+      'Terlambat': isOverdue ? 'Ya' : 'Tidak',
+      'Jumlah Subtugas': subtaskCount,
+    };
+  });
+  const wsTasks = XLSX.utils.json_to_sheet(taskRows);
+  XLSX.utils.book_append_sheet(wb, wsTasks, 'Tugas');
+
+  // Sheet 3: Personal Tasks
+  const todoRows = data.personalTasks.map(task => ({
+    'Judul': task.title,
+    'Deskripsi': task.description,
+    'Tanggal': task.due_date ? new Date(task.due_date).toLocaleDateString('id-ID') : '-',
+    'Status': STATUS_LABELS[task.status],
+    'Prioritas': PRIORITY_LABELS[task.priority],
+  }));
+  const wsTodos = XLSX.utils.json_to_sheet(todoRows);
+  XLSX.utils.book_append_sheet(wb, wsTodos, 'To-Do Personal');
+
+  // Sheet 4: Events
+  const eventRows = data.events.map(event => {
+    const project = data.projects.find(p => p.id === event.project_id);
+    return {
+      'ID': event.id.slice(0, 8),
+      'Judul': event.title,
+      'Deskripsi': event.description,
+      'Tipe': event.event_type === 'meeting' ? 'Rapat' : event.event_type === 'reminder' ? 'Pengingat' : 'Lainnya',
+      'Waktu Mulai': new Date(event.start_datetime).toLocaleString('id-ID'),
+      'Waktu Selesai': new Date(event.end_datetime).toLocaleString('id-ID'),
+      'Proyek': project?.name || '-',
+    };
+  });
+  const wsEvents = XLSX.utils.json_to_sheet(eventRows);
+  XLSX.utils.book_append_sheet(wb, wsEvents, 'Event');
+
+  const filename = projectFilter && projectFilter !== 'all' 
+    ? `ekspor_${data.projects.find(p => p.id === projectFilter)?.name?.toLowerCase().replace(/\s+/g, '_') || 'data'}_${new Date().toISOString().split('T')[0]}.xlsx`
+    : `ekspor_semua_data_${new Date().toISOString().split('T')[0]}.xlsx`;
+  
+  XLSX.writeFile(wb, filename);
+};

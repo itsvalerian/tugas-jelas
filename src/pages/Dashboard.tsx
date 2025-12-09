@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
-import { format, isToday, isTomorrow, addDays } from 'date-fns';
+import { format, isToday, isTomorrow, startOfWeek, endOfWeek, parseISO } from 'date-fns';
 import { id } from 'date-fns/locale';
 
 const Dashboard: React.FC = () => {
@@ -26,20 +26,38 @@ const Dashboard: React.FC = () => {
   const completedTasks = data.tasks.filter(t => t.status === 'done').length;
   const inProgressTasks = data.tasks.filter(t => t.status === 'in_progress').length;
 
-  // Get upcoming tasks (due within 7 days)
+  // Get tasks and events for current week
   const today = new Date();
+  const weekStart = startOfWeek(today, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
+
+  // Get tasks that overlap with current week
   const upcomingTasks = data.tasks
     .filter(t => {
-      if (!t.due_date || t.status === 'done') return false;
-      const dueDate = new Date(t.due_date);
-      return dueDate >= today && dueDate <= addDays(today, 7);
+      if (t.status === 'done') return false;
+      
+      const taskStart = t.start_date ? parseISO(t.start_date) : (t.due_date ? parseISO(t.due_date) : null);
+      const taskEnd = t.due_date ? parseISO(t.due_date) : taskStart;
+      
+      if (!taskStart || !taskEnd) return false;
+      
+      // Check if task overlaps with current week
+      return taskStart <= weekEnd && taskEnd >= weekStart;
     })
-    .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
+    .sort((a, b) => {
+      const aDate = a.start_date ? new Date(a.start_date) : new Date(a.due_date!);
+      const bDate = b.start_date ? new Date(b.start_date) : new Date(b.due_date!);
+      return aDate.getTime() - bDate.getTime();
+    })
     .slice(0, 5);
 
-  // Get upcoming events
+  // Get events for current week
   const upcomingEvents = data.events
-    .filter(e => new Date(e.start_datetime) >= today)
+    .filter(e => {
+      const eventStart = parseISO(e.start_datetime);
+      const eventEnd = parseISO(e.end_datetime);
+      return eventStart <= weekEnd && eventEnd >= weekStart;
+    })
     .sort((a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime())
     .slice(0, 5);
 
@@ -50,11 +68,21 @@ const Dashboard: React.FC = () => {
     { label: 'Terlambat', value: overdueTasks, icon: AlertCircle, color: 'text-destructive' },
   ];
 
-  const formatDueDate = (date: string) => {
-    const d = new Date(date);
-    if (isToday(d)) return 'Hari ini';
-    if (isTomorrow(d)) return 'Besok';
-    return format(d, 'd MMM', { locale: id });
+  const formatTaskDate = (task: typeof data.tasks[0]) => {
+    const startDate = task.start_date ? parseISO(task.start_date) : null;
+    const endDate = task.due_date ? parseISO(task.due_date) : null;
+    const displayDate = startDate || endDate;
+    
+    if (!displayDate) return '-';
+    if (isToday(displayDate)) return 'Hari ini';
+    if (isTomorrow(displayDate)) return 'Besok';
+    
+    // If multi-day task, show range
+    if (startDate && endDate && startDate.getTime() !== endDate.getTime()) {
+      return `${format(startDate, 'd', { locale: id })} - ${format(endDate, 'd MMM', { locale: id })}`;
+    }
+    
+    return format(displayDate, 'd MMM', { locale: id });
   };
 
   return (
@@ -131,7 +159,7 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-warning" />
-              <h3 className="font-semibold text-foreground">Tugas Mendatang</h3>
+              <h3 className="font-semibold text-foreground">Tugas Minggu Ini</h3>
             </div>
             <Link to="/tasks" className="text-sm text-primary hover:underline">
               Lihat Semua
@@ -139,7 +167,7 @@ const Dashboard: React.FC = () => {
           </div>
           <div className="space-y-3">
             {upcomingTasks.length === 0 ? (
-              <p className="text-muted-foreground text-sm">Tidak ada tugas mendatang</p>
+              <p className="text-muted-foreground text-sm">Tidak ada tugas untuk minggu ini</p>
             ) : (
               upcomingTasks.map(task => {
                 const project = data.projects.find(p => p.id === task.project_id);
@@ -155,7 +183,7 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <PriorityBadge priority={task.priority} showLabel={false} />
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDueDate(task.due_date!)}
+                        {formatTaskDate(task)}
                       </span>
                     </div>
                   </div>
@@ -170,7 +198,7 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <CalendarIcon className="w-5 h-5 text-info" />
-              <h3 className="font-semibold text-foreground">Event Mendatang</h3>
+              <h3 className="font-semibold text-foreground">Event Minggu Ini</h3>
             </div>
             <Link to="/calendar" className="text-sm text-primary hover:underline">
               Lihat Semua
@@ -178,7 +206,7 @@ const Dashboard: React.FC = () => {
           </div>
           <div className="space-y-3">
             {upcomingEvents.length === 0 ? (
-              <p className="text-muted-foreground text-sm">Tidak ada event mendatang</p>
+              <p className="text-muted-foreground text-sm">Tidak ada event untuk minggu ini</p>
             ) : (
               upcomingEvents.map(event => (
                 <div
