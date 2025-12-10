@@ -7,54 +7,94 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { GanttChart as GanttIcon } from 'lucide-react';
-import { format, parseISO, differenceInDays, addDays, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { GanttChart as GanttIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { 
+  format, 
+  parseISO, 
+  differenceInDays, 
+  addDays, 
+  startOfMonth, 
+  endOfMonth, 
+  startOfWeek,
+  endOfWeek,
+  addMonths,
+  subMonths,
+  addWeeks,
+  subWeeks,
+  eachDayOfInterval 
+} from 'date-fns';
 import { id } from 'date-fns/locale';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 
+type TimeFilter = 'week' | 'month';
+
 const GanttPage: React.FC = () => {
   const { data, getTasksByProject } = useData();
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(data.projects[0]?.id || '');
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('all');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('month');
+  const [currentDate, setCurrentDate] = useState(new Date());
 
-  const project = data.projects.find(p => p.id === selectedProjectId);
-  const tasks = selectedProjectId ? getTasksByProject(selectedProjectId) : [];
+  // Get projects filtered by workspace
+  const filteredProjects = useMemo(() => {
+    if (selectedWorkspaceId === 'all') return data.projects;
+    return data.projects.filter(p => p.workspace_id === selectedWorkspaceId);
+  }, [data.projects, selectedWorkspaceId]);
 
-  // Calculate date range
+  // Get tasks based on selection
+  const tasks = useMemo(() => {
+    if (selectedProjectId !== 'all') {
+      return getTasksByProject(selectedProjectId);
+    }
+    // Get all tasks from filtered projects
+    return data.tasks.filter(t => 
+      filteredProjects.some(p => p.id === t.project_id)
+    );
+  }, [selectedProjectId, filteredProjects, data.tasks, getTasksByProject]);
+
+  // Calculate date range based on time filter
   const dateRange = useMemo(() => {
-    const tasksWithDates = tasks.filter(t => t.start_date || t.due_date);
-    
-    if (tasksWithDates.length === 0) {
-      const start = startOfMonth(new Date());
-      const end = endOfMonth(new Date());
-      return { start, end, days: eachDayOfInterval({ start, end }) };
+    let start: Date;
+    let end: Date;
+
+    if (timeFilter === 'week') {
+      start = startOfWeek(currentDate, { weekStartsOn: 1 });
+      end = endOfWeek(currentDate, { weekStartsOn: 1 });
+    } else {
+      start = startOfMonth(currentDate);
+      end = endOfMonth(currentDate);
     }
 
-    let minDate = new Date();
-    let maxDate = new Date();
-
-    tasksWithDates.forEach(t => {
-      if (t.start_date) {
-        const d = parseISO(t.start_date);
-        if (d < minDate) minDate = d;
-      }
-      if (t.due_date) {
-        const d = parseISO(t.due_date);
-        if (d > maxDate) maxDate = d;
-      }
-    });
-
-    // Add buffer days
-    minDate = addDays(minDate, -3);
-    maxDate = addDays(maxDate, 3);
-
     return {
-      start: minDate,
-      end: maxDate,
-      days: eachDayOfInterval({ start: minDate, end: maxDate }),
+      start,
+      end,
+      days: eachDayOfInterval({ start, end }),
     };
-  }, [tasks]);
+  }, [currentDate, timeFilter]);
+
+  const handlePrev = () => {
+    if (timeFilter === 'week') {
+      setCurrentDate(subWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(subMonths(currentDate, 1));
+    }
+  };
+
+  const handleNext = () => {
+    if (timeFilter === 'week') {
+      setCurrentDate(addWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(addMonths(currentDate, 1));
+    }
+  };
+
+  // Reset project selection when workspace changes
+  const handleWorkspaceChange = (value: string) => {
+    setSelectedWorkspaceId(value);
+    setSelectedProjectId('all');
+  };
 
   const totalDays = dateRange.days.length;
 
@@ -68,6 +108,21 @@ const GanttPage: React.FC = () => {
     }
   };
 
+  // Filter tasks that are visible in current date range
+  const visibleTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if (!t.start_date && !t.due_date) return false;
+      const taskStart = t.start_date ? parseISO(t.start_date) : parseISO(t.due_date!);
+      const taskEnd = t.due_date ? parseISO(t.due_date) : taskStart;
+      return taskEnd >= dateRange.start && taskStart <= dateRange.end;
+    });
+  }, [tasks, dateRange]);
+
+  // Get project name for task
+  const getProjectName = (projectId: string) => {
+    return data.projects.find(p => p.id === projectId)?.name || '';
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -76,18 +131,44 @@ const GanttPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-foreground">Gantt Chart</h1>
           <p className="text-muted-foreground mt-1">Timeline proyek Anda</p>
         </div>
-        {data.projects.length > 0 && (
-          <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Pilih proyek" />
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Time Filter */}
+          <Select value={timeFilter} onValueChange={(v: TimeFilter) => setTimeFilter(v)}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {data.projects.map(p => (
+              <SelectItem value="week">Mingguan</SelectItem>
+              <SelectItem value="month">Bulanan</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Workspace Filter */}
+          <Select value={selectedWorkspaceId} onValueChange={handleWorkspaceChange}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Ruang Kerja" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Ruang Kerja</SelectItem>
+              {data.workspaces.map(w => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Project Filter */}
+          <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Proyek" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Proyek</SelectItem>
+              {filteredProjects.map(p => (
                 <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        )}
+        </div>
       </div>
 
       {/* Empty State */}
@@ -100,109 +181,119 @@ const GanttPage: React.FC = () => {
             <Button className="mt-4">Buat Proyek</Button>
           </Link>
         </div>
-      ) : tasks.length === 0 ? (
+      ) : visibleTasks.length === 0 ? (
         <div className="text-center py-12 bg-card border border-border rounded-xl">
           <GanttIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-foreground">Belum ada tugas</h3>
-          <p className="text-muted-foreground mt-1">Tambahkan tugas dengan tanggal untuk melihat di Gantt chart</p>
+          <h3 className="text-lg font-medium text-foreground">Tidak ada tugas</h3>
+          <p className="text-muted-foreground mt-1">
+            Tidak ada tugas dalam periode {timeFilter === 'week' ? 'minggu' : 'bulan'} ini
+          </p>
         </div>
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          {/* Project Header */}
-          <div className="p-4 border-b border-border">
-            <h2 className="text-lg font-semibold text-foreground">{project?.name}</h2>
-            <p className="text-sm text-muted-foreground">
-              {format(dateRange.start, 'd MMM', { locale: id })} - {format(dateRange.end, 'd MMM yyyy', { locale: id })}
-            </p>
+          {/* Navigation Header */}
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <Button variant="outline" size="icon" onClick={handlePrev}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <h2 className="text-lg font-semibold text-foreground">
+              {timeFilter === 'week' 
+                ? `${format(dateRange.start, 'd MMM', { locale: id })} - ${format(dateRange.end, 'd MMM yyyy', { locale: id })}`
+                : format(currentDate, 'MMMM yyyy', { locale: id })
+              }
+            </h2>
+            <Button variant="outline" size="icon" onClick={handleNext}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
           </div>
 
           {/* Gantt Chart */}
           <div className="overflow-x-auto scrollbar-thin">
-            <div className="min-w-[800px]">
+            <div style={{ minWidth: Math.max(800, totalDays * 40) }}>
               {/* Date Header */}
               <div className="flex border-b border-border sticky top-0 bg-card z-10">
                 <div className="w-64 shrink-0 p-3 border-r border-border">
                   <span className="text-sm font-medium text-muted-foreground">Tugas</span>
                 </div>
-                <div className="flex-1 relative">
+                <div className="flex-1">
                   <div className="flex">
-                    {dateRange.days.map((day, idx) => {
-                      const colWidth = 100 / totalDays;
-                      return (
-                        <div
-                          key={idx}
-                          className="text-center text-xs text-muted-foreground p-2 border-r border-border"
-                          style={{ width: `${colWidth}%`, minWidth: '40px' }}
-                        >
-                          <div>{format(day, 'd')}</div>
-                          <div className="text-[10px]">{format(day, 'EEE', { locale: id })}</div>
-                        </div>
-                      );
-                    })}
+                    {dateRange.days.map((day, idx) => (
+                      <div
+                        key={idx}
+                        className="text-center text-xs text-muted-foreground p-2 border-r border-border flex-1"
+                        style={{ minWidth: '40px' }}
+                      >
+                        <div className="font-medium">{format(day, 'd')}</div>
+                        <div className="text-[10px]">{format(day, 'EEE', { locale: id })}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
 
               {/* Tasks */}
-              {tasks
-                .filter(t => t.start_date || t.due_date)
-                .map(task => {
-                  const start = task.start_date ? parseISO(task.start_date) : parseISO(task.due_date!);
-                  const end = task.due_date ? parseISO(task.due_date) : start;
-                  
-                  const startOffset = differenceInDays(start, dateRange.start);
-                  const duration = Math.max(differenceInDays(end, start) + 1, 1);
-                  const colWidth = 100 / totalDays;
-                  
-                  return (
-                    <div key={task.id} className="flex border-b border-border hover:bg-accent/30 transition-colors">
-                      <div className="w-64 shrink-0 p-3 border-r border-border">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-foreground truncate">{task.title}</span>
-                          <StatusBadge status={task.status} className="text-[10px] px-1.5 py-0.5" />
-                        </div>
-                      </div>
-                      <div className="flex-1 relative h-12">
-                        <div className="flex h-full">
-                          {dateRange.days.map((_, idx) => (
-                            <div
-                              key={idx}
-                              className="border-r border-border/30"
-                              style={{ width: `${colWidth}%`, minWidth: '40px' }}
-                            />
-                          ))}
-                        </div>
-                        <div
-                          className={`absolute top-1/2 -translate-y-1/2 h-6 rounded ${getStatusColor(task.status)} opacity-90 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center`}
-                          style={{
-                            left: `calc(${startOffset * colWidth}% + 2px)`,
-                            width: `calc(${duration * colWidth}% - 4px)`,
-                            minWidth: '20px'
-                          }}
-                          title={`${task.title} (${task.start_date ? format(parseISO(task.start_date), 'd MMM', { locale: id }) : ''} - ${task.due_date ? format(parseISO(task.due_date), 'd MMM', { locale: id }) : ''})`}
-                        >
-                          <span className="text-[10px] text-foreground font-medium truncate px-2">
-                            {task.title}
+              {visibleTasks.map(task => {
+                const taskStart = task.start_date ? parseISO(task.start_date) : parseISO(task.due_date!);
+                const taskEnd = task.due_date ? parseISO(task.due_date) : taskStart;
+                
+                // Clamp to visible range
+                const visibleStart = taskStart < dateRange.start ? dateRange.start : taskStart;
+                const visibleEnd = taskEnd > dateRange.end ? dateRange.end : taskEnd;
+                
+                const startOffset = differenceInDays(visibleStart, dateRange.start);
+                const duration = Math.max(differenceInDays(visibleEnd, visibleStart) + 1, 1);
+                
+                const leftPercent = (startOffset / totalDays) * 100;
+                const widthPercent = (duration / totalDays) * 100;
+                
+                return (
+                  <div key={task.id} className="flex border-b border-border hover:bg-accent/30 transition-colors">
+                    <div className="w-64 shrink-0 p-3 border-r border-border">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-medium text-foreground truncate">{task.title}</span>
+                        {selectedProjectId === 'all' && (
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            {getProjectName(task.project_id)}
                           </span>
-                        </div>
+                        )}
+                      </div>
+                      <StatusBadge status={task.status} className="text-[10px] px-1.5 py-0.5 mt-1" />
+                    </div>
+                    <div className="flex-1 relative h-16">
+                      {/* Grid lines */}
+                      <div className="flex h-full absolute inset-0">
+                        {dateRange.days.map((_, idx) => (
+                          <div
+                            key={idx}
+                            className="border-r border-border/30 flex-1"
+                            style={{ minWidth: '40px' }}
+                          />
+                        ))}
+                      </div>
+                      {/* Task bar */}
+                      <div
+                        className={`absolute top-1/2 -translate-y-1/2 h-7 rounded ${getStatusColor(task.status)} opacity-90 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shadow-sm`}
+                        style={{
+                          left: `${leftPercent}%`,
+                          width: `${widthPercent}%`,
+                        }}
+                        title={`${task.title} (${task.start_date ? format(parseISO(task.start_date), 'd MMM', { locale: id }) : ''} - ${task.due_date ? format(parseISO(task.due_date), 'd MMM', { locale: id }) : ''})`}
+                      >
+                        <span className="text-[10px] text-foreground font-medium truncate px-2">
+                          {task.title}
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
-
-              {/* Tasks without dates message */}
-              {tasks.filter(t => !t.start_date && !t.due_date).length > 0 && (
-                <div className="p-4 text-center text-sm text-muted-foreground border-t border-border">
-                  {tasks.filter(t => !t.start_date && !t.due_date).length} tugas tidak memiliki tanggal
-                </div>
-              )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
       )}
 
       {/* Legend */}
-      <div className="flex items-center gap-6 text-sm">
+      <div className="flex items-center gap-6 text-sm flex-wrap">
         <span className="text-muted-foreground">Legenda:</span>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded bg-primary" />
