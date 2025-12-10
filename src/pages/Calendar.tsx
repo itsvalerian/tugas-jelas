@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, X } from 'lucide-react';
 import { 
   format, 
   startOfMonth, 
@@ -32,19 +32,36 @@ import {
   isSameMonth,
   isSameDay,
   isToday,
-  parseISO
+  parseISO,
+  getDay
 } from 'date-fns';
 import { id } from 'date-fns/locale';
-import { EventType, EVENT_TYPE_LABELS, Task } from '@/types';
+import { EventType, EVENT_TYPE_LABELS, Task, Event } from '@/types';
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
 
 type ViewMode = 'month' | 'week' | 'day';
+
+type CalendarItem = {
+  id: string;
+  title: string;
+  startDate: Date;
+  endDate: Date;
+  type: 'task' | 'event';
+  color: string;
+  originalItem: Task | Event;
+  row?: number; // Row position for layout
+};
 
 const CalendarPage: React.FC = () => {
   const { data, addEvent, updateEvent, deleteEvent } = useData();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
+  const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [expandedDate, setExpandedDate] = useState<Date | null>(null);
   
   // Event form state
   const [eventTitle, setEventTitle] = useState('');
@@ -55,16 +72,6 @@ const CalendarPage: React.FC = () => {
   const [eventProjectId, setEventProjectId] = useState('');
 
   // Get calendar items (tasks + events)
-  type CalendarItem = {
-    id: string;
-    title: string;
-    startDate: Date;
-    endDate: Date;
-    type: 'task' | 'event';
-    color: string;
-    originalItem: Task | typeof data.events[0];
-  };
-
   const calendarItems = useMemo((): CalendarItem[] => {
     const items: CalendarItem[] = [];
 
@@ -120,12 +127,23 @@ const CalendarPage: React.FC = () => {
     else setCurrentDate(addDays(currentDate, 1));
   };
 
-  const handleDateClick = (date: Date) => {
+  const handleCellClick = (date: Date, e: React.MouseEvent) => {
+    // Only open event dialog if clicking on empty area (not on a task bar)
+    if ((e.target as HTMLElement).closest('.calendar-item-bar')) return;
+    
     setSelectedDate(date);
     const dateStr = format(date, "yyyy-MM-dd'T'HH:mm");
     setEventStartDateTime(dateStr.slice(0, 16));
     setEventEndDateTime(dateStr.slice(0, 16));
     setIsEventDialogOpen(true);
+  };
+
+  const handleItemClick = (item: CalendarItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (item.type === 'task') {
+      setSelectedTask(item.originalItem as Task);
+      setIsTaskDetailOpen(true);
+    }
   };
 
   const handleSubmitEvent = (e: React.FormEvent) => {
@@ -171,7 +189,7 @@ const CalendarPage: React.FC = () => {
 
   const weekDays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 
-  // Check if a date falls within an item's date range
+  // Get items for a date with row assignments
   const getItemsForDate = (date: Date) => {
     return calendarItems.filter(item => {
       const itemStart = new Date(item.startDate.getFullYear(), item.startDate.getMonth(), item.startDate.getDate());
@@ -181,28 +199,84 @@ const CalendarPage: React.FC = () => {
     });
   };
 
+  // Assign rows to items for a week to prevent overlapping
+  const getItemsWithRowsForWeek = (weekStart: Date): Map<string, number> => {
+    const rowMap = new Map<string, number>();
+    const usedRows: { [row: number]: { start: Date; end: Date }[] } = {};
+    
+    // Get all items that appear in this week
+    const weekItems: CalendarItem[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(weekStart, i);
+      const dayItems = getItemsForDate(d);
+      dayItems.forEach(item => {
+        if (!weekItems.find(wi => wi.id === item.id)) {
+          weekItems.push(item);
+        }
+      });
+    }
+    
+    // Sort by start date, then by duration (longer first)
+    weekItems.sort((a, b) => {
+      const startDiff = a.startDate.getTime() - b.startDate.getTime();
+      if (startDiff !== 0) return startDiff;
+      const aDuration = a.endDate.getTime() - a.startDate.getTime();
+      const bDuration = b.endDate.getTime() - b.startDate.getTime();
+      return bDuration - aDuration;
+    });
+    
+    // Assign rows
+    weekItems.forEach(item => {
+      const itemStart = new Date(Math.max(item.startDate.getTime(), weekStart.getTime()));
+      const weekEnd = addDays(weekStart, 6);
+      const itemEnd = new Date(Math.min(item.endDate.getTime(), weekEnd.getTime()));
+      
+      let assignedRow = 0;
+      while (true) {
+        const rowItems = usedRows[assignedRow] || [];
+        const hasConflict = rowItems.some(ri => 
+          !(itemEnd < ri.start || itemStart > ri.end)
+        );
+        if (!hasConflict) {
+          if (!usedRows[assignedRow]) usedRows[assignedRow] = [];
+          usedRows[assignedRow].push({ start: itemStart, end: itemEnd });
+          break;
+        }
+        assignedRow++;
+      }
+      rowMap.set(item.id, assignedRow);
+    });
+    
+    return rowMap;
+  };
+
   // Check position of date within item's range for styling
-  // For multi-week tasks, show title at start of each week
-  const getItemPosition = (item: CalendarItem, date: Date): 'start' | 'middle' | 'end' | 'single' | 'week-start' => {
+  const getItemPosition = (item: CalendarItem, date: Date, weekStart: Date): 'start' | 'middle' | 'end' | 'single' | 'week-start' => {
     const isStart = isSameDay(item.startDate, date);
     const isEnd = isSameDay(item.endDate, date);
+    const isWeekStart = isSameDay(weekStart, date) && !isStart;
+    
     if (isStart && isEnd) return 'single';
     if (isStart) return 'start';
     if (isEnd) return 'end';
-    // Check if it's start of a week (Monday)
-    const dayOfWeek = date.getDay();
-    if (dayOfWeek === 1) return 'week-start'; // Monday
+    if (isWeekStart) return 'week-start';
     return 'middle';
   };
 
   const getPositionClasses = (position: 'start' | 'middle' | 'end' | 'single' | 'week-start') => {
     switch (position) {
-      case 'start': return 'rounded-l border-l border-t border-b';
-      case 'week-start': return 'border-t border-b'; // Middle style but will show title
-      case 'middle': return 'border-t border-b';
-      case 'end': return 'rounded-r border-r border-t border-b';
-      case 'single': return 'rounded border';
+      case 'start': return 'rounded-l-sm ml-0.5';
+      case 'week-start': return 'rounded-l-sm ml-0.5';
+      case 'middle': return '';
+      case 'end': return 'rounded-r-sm mr-0.5';
+      case 'single': return 'rounded-sm mx-0.5';
     }
+  };
+
+  // Get project name for task
+  const getProjectName = (projectId: string | null) => {
+    if (!projectId) return null;
+    return data.projects.find(p => p.id === projectId)?.name;
   };
 
   return (
@@ -224,7 +298,13 @@ const CalendarPage: React.FC = () => {
               <SelectItem value="day">Harian</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={() => handleDateClick(new Date())}>
+          <Button onClick={() => {
+            setSelectedDate(new Date());
+            const dateStr = format(new Date(), "yyyy-MM-dd'T'HH:mm");
+            setEventStartDateTime(dateStr.slice(0, 16));
+            setEventEndDateTime(dateStr.slice(0, 16));
+            setIsEventDialogOpen(true);
+          }}>
             <Plus className="w-4 h-4 mr-2" />
             Tambah Event
           </Button>
@@ -257,48 +337,80 @@ const CalendarPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-7">
               {days.map((date, idx) => {
+                const weekIdx = Math.floor(idx / 7);
+                const weekStart = days[weekIdx * 7];
+                const rowMap = getItemsWithRowsForWeek(weekStart);
                 const dayItems = getItemsForDate(date);
                 const isCurrentMonth = isSameMonth(date, currentDate);
                 const isCurrentDay = isToday(date);
+                const isExpanded = expandedDate && isSameDay(expandedDate, date);
+                
+                // Sort items by their row
+                const sortedItems = [...dayItems].sort((a, b) => {
+                  const rowA = rowMap.get(a.id) ?? 999;
+                  const rowB = rowMap.get(b.id) ?? 999;
+                  return rowA - rowB;
+                });
+                
+                const maxVisibleItems = 3;
+                const hasMore = sortedItems.length > maxVisibleItems;
+                const visibleItems = isExpanded ? sortedItems : sortedItems.slice(0, maxVisibleItems);
 
                 return (
                   <div
                     key={idx}
-                    onClick={() => handleDateClick(date)}
-                    className={`min-h-24 p-1 border-t border-l border-border cursor-pointer transition-colors hover:bg-accent/30
+                    onClick={(e) => handleCellClick(date, e)}
+                    className={`min-h-24 border-t border-l border-border cursor-pointer transition-colors hover:bg-accent/30 relative
                       ${idx % 7 === 6 ? 'border-r' : ''}
                       ${idx >= days.length - 7 ? 'border-b' : ''}
                       ${!isCurrentMonth ? 'opacity-40 bg-muted/20' : ''}
                       ${isCurrentDay ? 'bg-primary/10' : ''}
                     `}
                   >
-                    <span className={`text-sm font-medium block mb-1 ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
+                    <span className={`text-sm font-medium block p-1 ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
                       {format(date, 'd')}
                     </span>
-                    <div className="space-y-0.5">
-                      {dayItems.slice(0, 3).map(item => {
-                        const position = getItemPosition(item, date);
+                    <div className="space-y-0.5 px-0">
+                      {visibleItems.map(item => {
+                        const position = getItemPosition(item, date, weekStart);
                         const positionClasses = getPositionClasses(position);
                         const showTitle = position === 'start' || position === 'single' || position === 'week-start';
+                        const row = rowMap.get(item.id) ?? 0;
+                        
                         return (
                           <div
-                            key={item.id}
-                            className={`text-xs h-5 flex items-center overflow-hidden ${item.color} ${positionClasses}`}
+                            key={`${item.id}-${row}`}
+                            onClick={(e) => handleItemClick(item, e)}
+                            className={`calendar-item-bar text-xs h-5 flex items-center ${item.color} ${positionClasses} cursor-pointer hover:opacity-80 transition-opacity`}
                             style={{ 
-                              marginLeft: position === 'middle' || position === 'end' || position === 'week-start' ? '-4px' : '0',
-                              marginRight: position === 'middle' || position === 'start' || position === 'week-start' ? '-4px' : '0',
-                              paddingLeft: position === 'middle' || position === 'end' || position === 'week-start' ? '6px' : '4px',
-                              paddingRight: '4px'
+                              order: row
                             }}
                           >
-                            {showTitle && <span className="truncate font-medium">{item.title}</span>}
+                            {showTitle && <span className="truncate font-medium px-1">{item.title}</span>}
                           </div>
                         );
                       })}
-                      {dayItems.length > 3 && (
-                        <div className="text-xs text-muted-foreground pl-1">
-                          +{dayItems.length - 3} lagi
-                        </div>
+                      {hasMore && !isExpanded && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDate(date);
+                          }}
+                          className="text-xs text-muted-foreground hover:text-foreground pl-1 w-full text-left"
+                        >
+                          +{sortedItems.length - maxVisibleItems} lagi
+                        </button>
+                      )}
+                      {isExpanded && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedDate(null);
+                          }}
+                          className="text-xs text-muted-foreground hover:text-foreground pl-1 w-full text-left"
+                        >
+                          Sembunyikan
+                        </button>
                       )}
                     </div>
                   </div>
@@ -319,7 +431,7 @@ const CalendarPage: React.FC = () => {
                 return (
                   <div
                     key={idx}
-                    onClick={() => handleDateClick(date)}
+                    onClick={(e) => handleCellClick(date, e)}
                     className={`min-h-48 p-3 border border-border rounded-lg cursor-pointer transition-colors hover:bg-accent/50
                       ${isCurrentDay ? 'border-primary bg-primary/5' : ''}
                     `}
@@ -334,7 +446,8 @@ const CalendarPage: React.FC = () => {
                       {dayItems.map(item => (
                         <div
                           key={item.id}
-                          className={`text-xs p-2 rounded border ${item.color}`}
+                          onClick={(e) => handleItemClick(item, e)}
+                          className={`calendar-item-bar text-xs p-2 rounded border ${item.color} cursor-pointer hover:opacity-80 transition-opacity`}
                         >
                           <p className="font-medium truncate">{item.title}</p>
                           <p className="text-[10px] opacity-75 mt-0.5">
@@ -364,7 +477,8 @@ const CalendarPage: React.FC = () => {
                   getItemsForDate(currentDate).map(item => (
                     <div
                       key={item.id}
-                      className={`p-4 rounded-lg border ${item.color}`}
+                      onClick={(e) => handleItemClick(item, e)}
+                      className={`calendar-item-bar p-4 rounded-lg border ${item.color} cursor-pointer hover:opacity-80 transition-opacity`}
                     >
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium">{item.title}</h3>
@@ -374,7 +488,7 @@ const CalendarPage: React.FC = () => {
                       </div>
                       {item.type === 'event' && (
                         <p className="text-sm mt-1 opacity-75">
-                          {format(parseISO((item.originalItem as typeof data.events[0]).start_datetime), 'HH:mm', { locale: id })}
+                          {format(parseISO((item.originalItem as Event).start_datetime), 'HH:mm', { locale: id })}
                         </p>
                       )}
                     </div>
@@ -441,10 +555,70 @@ const CalendarPage: React.FC = () => {
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-4">
-              <Button type="button" variant="outline" onClick={() => setIsEventDialogOpen(false)}>Batal</Button>
-              <Button type="submit">Tambah</Button>
+              <Button type="button" variant="outline" onClick={() => setIsEventDialogOpen(false)}>
+                Batal
+              </Button>
+              <Button type="submit">Simpan</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task Detail Dialog */}
+      <Dialog open={isTaskDetailOpen} onOpenChange={setIsTaskDetailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Detail Tugas</DialogTitle>
+          </DialogHeader>
+          {selectedTask && (
+            <div className="space-y-4 mt-4">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">{selectedTask.title}</h3>
+                {getProjectName(selectedTask.project_id) && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Proyek: {getProjectName(selectedTask.project_id)}
+                  </p>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <StatusBadge status={selectedTask.status} />
+                <PriorityBadge priority={selectedTask.priority} />
+              </div>
+              
+              {selectedTask.description && (
+                <div>
+                  <Label className="text-muted-foreground">Deskripsi</Label>
+                  <p className="text-foreground mt-1">{selectedTask.description}</p>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-2 gap-4">
+                {selectedTask.start_date && (
+                  <div>
+                    <Label className="text-muted-foreground">Tanggal Mulai</Label>
+                    <p className="text-foreground mt-1">
+                      {format(parseISO(selectedTask.start_date), 'd MMMM yyyy', { locale: id })}
+                    </p>
+                  </div>
+                )}
+                {selectedTask.due_date && (
+                  <div>
+                    <Label className="text-muted-foreground">Tanggal Jatuh Tempo</Label>
+                    <p className="text-foreground mt-1">
+                      {format(parseISO(selectedTask.due_date), 'd MMMM yyyy', { locale: id })}
+                    </p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex justify-end pt-4">
+                <Button variant="outline" onClick={() => setIsTaskDetailOpen(false)}>
+                  Tutup
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
