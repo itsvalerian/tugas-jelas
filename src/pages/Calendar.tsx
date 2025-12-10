@@ -189,7 +189,7 @@ const CalendarPage: React.FC = () => {
 
   const weekDays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 
-  // Get items for a date with row assignments
+  // Get items for a date
   const getItemsForDate = (date: Date) => {
     return calendarItems.filter(item => {
       const itemStart = new Date(item.startDate.getFullYear(), item.startDate.getMonth(), item.startDate.getDate());
@@ -199,25 +199,13 @@ const CalendarPage: React.FC = () => {
     });
   };
 
-  // Assign rows to items for a week to prevent overlapping
-  const getItemsWithRowsForWeek = (weekStart: Date): Map<string, number> => {
+  // Assign rows to ALL items for the entire calendar view (consistent across weeks)
+  const globalRowMap = useMemo(() => {
     const rowMap = new Map<string, number>();
     const usedRows: { [row: number]: { start: Date; end: Date }[] } = {};
     
-    // Get all items that appear in this week
-    const weekItems: CalendarItem[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = addDays(weekStart, i);
-      const dayItems = getItemsForDate(d);
-      dayItems.forEach(item => {
-        if (!weekItems.find(wi => wi.id === item.id)) {
-          weekItems.push(item);
-        }
-      });
-    }
-    
-    // Sort by start date, then by duration (longer first)
-    weekItems.sort((a, b) => {
+    // Sort all items by start date, then by duration (longer first)
+    const sortedItems = [...calendarItems].sort((a, b) => {
       const startDiff = a.startDate.getTime() - b.startDate.getTime();
       if (startDiff !== 0) return startDiff;
       const aDuration = a.endDate.getTime() - a.startDate.getTime();
@@ -225,11 +213,10 @@ const CalendarPage: React.FC = () => {
       return bDuration - aDuration;
     });
     
-    // Assign rows
-    weekItems.forEach(item => {
-      const itemStart = new Date(Math.max(item.startDate.getTime(), weekStart.getTime()));
-      const weekEnd = addDays(weekStart, 6);
-      const itemEnd = new Date(Math.min(item.endDate.getTime(), weekEnd.getTime()));
+    // Assign rows globally
+    sortedItems.forEach(item => {
+      const itemStart = new Date(item.startDate.getFullYear(), item.startDate.getMonth(), item.startDate.getDate());
+      const itemEnd = new Date(item.endDate.getFullYear(), item.endDate.getMonth(), item.endDate.getDate());
       
       let assignedRow = 0;
       while (true) {
@@ -248,7 +235,7 @@ const CalendarPage: React.FC = () => {
     });
     
     return rowMap;
-  };
+  }, [calendarItems]);
 
   // Check position of date within item's range for styling
   const getItemPosition = (item: CalendarItem, date: Date, weekStart: Date): 'start' | 'middle' | 'end' | 'single' | 'week-start' => {
@@ -339,16 +326,15 @@ const CalendarPage: React.FC = () => {
               {days.map((date, idx) => {
                 const weekIdx = Math.floor(idx / 7);
                 const weekStart = days[weekIdx * 7];
-                const rowMap = getItemsWithRowsForWeek(weekStart);
                 const dayItems = getItemsForDate(date);
                 const isCurrentMonth = isSameMonth(date, currentDate);
                 const isCurrentDay = isToday(date);
                 const isExpanded = expandedDate && isSameDay(expandedDate, date);
                 
-                // Sort items by their row
+                // Sort items by their global row assignment
                 const sortedItems = [...dayItems].sort((a, b) => {
-                  const rowA = rowMap.get(a.id) ?? 999;
-                  const rowB = rowMap.get(b.id) ?? 999;
+                  const rowA = globalRowMap.get(a.id) ?? 999;
+                  const rowB = globalRowMap.get(b.id) ?? 999;
                   return rowA - rowB;
                 });
                 
@@ -375,7 +361,7 @@ const CalendarPage: React.FC = () => {
                         const position = getItemPosition(item, date, weekStart);
                         const positionClasses = getPositionClasses(position);
                         const showTitle = position === 'start' || position === 'single' || position === 'week-start';
-                        const row = rowMap.get(item.id) ?? 0;
+                        const row = globalRowMap.get(item.id) ?? 0;
                         
                         return (
                           <div
