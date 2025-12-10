@@ -331,16 +331,19 @@ const CalendarPage: React.FC = () => {
                 const isCurrentDay = isToday(date);
                 const isExpanded = expandedDate && isSameDay(expandedDate, date);
                 
-                // Sort items by their global row assignment
-                const sortedItems = [...dayItems].sort((a, b) => {
-                  const rowA = globalRowMap.get(a.id) ?? 999;
-                  const rowB = globalRowMap.get(b.id) ?? 999;
-                  return rowA - rowB;
-                });
+                // Get max row for this day to know how many slots we need
+                const maxRow = Math.max(0, ...dayItems.map(item => globalRowMap.get(item.id) ?? 0));
                 
-                const maxVisibleItems = 3;
-                const hasMore = sortedItems.length > maxVisibleItems;
-                const visibleItems = isExpanded ? sortedItems : sortedItems.slice(0, maxVisibleItems);
+                // Create array of slots (rows) - each slot might have an item or be empty
+                const slots: (CalendarItem | null)[] = [];
+                for (let r = 0; r <= maxRow; r++) {
+                  const itemInRow = dayItems.find(item => globalRowMap.get(item.id) === r);
+                  slots.push(itemInRow || null);
+                }
+                
+                const maxVisibleSlots = 3;
+                const hasMore = slots.length > maxVisibleSlots;
+                const visibleSlots = isExpanded ? slots : slots.slice(0, maxVisibleSlots);
 
                 return (
                   <div
@@ -356,21 +359,22 @@ const CalendarPage: React.FC = () => {
                     <span className={`text-sm font-medium block p-1 ${isCurrentDay ? 'text-primary' : 'text-foreground'}`}>
                       {format(date, 'd')}
                     </span>
-                    <div className="space-y-0.5 px-0">
-                      {visibleItems.map(item => {
+                    <div className="flex flex-col gap-0.5">
+                      {visibleSlots.map((item, slotIdx) => {
+                        if (!item) {
+                          // Empty placeholder to maintain row alignment
+                          return <div key={`empty-${slotIdx}`} className="h-5" />;
+                        }
+                        
                         const position = getItemPosition(item, date, weekStart);
                         const positionClasses = getPositionClasses(position);
                         const showTitle = position === 'start' || position === 'single' || position === 'week-start';
-                        const row = globalRowMap.get(item.id) ?? 0;
                         
                         return (
                           <div
-                            key={`${item.id}-${row}`}
+                            key={item.id}
                             onClick={(e) => handleItemClick(item, e)}
                             className={`calendar-item-bar text-xs h-5 flex items-center ${item.color} ${positionClasses} cursor-pointer hover:opacity-80 transition-opacity`}
-                            style={{ 
-                              order: row
-                            }}
                           >
                             {showTitle && <span className="truncate font-medium px-1">{item.title}</span>}
                           </div>
@@ -384,7 +388,7 @@ const CalendarPage: React.FC = () => {
                           }}
                           className="text-xs text-muted-foreground hover:text-foreground pl-1 w-full text-left"
                         >
-                          +{sortedItems.length - maxVisibleItems} lagi
+                          +{slots.length - maxVisibleSlots} lagi
                         </button>
                       )}
                       {isExpanded && (
